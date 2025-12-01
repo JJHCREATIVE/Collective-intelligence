@@ -1,5 +1,5 @@
-import { initializeApp } from 'firebase/app';
-import { getDatabase, ref, onValue, set, get } from 'firebase/database';
+import { initializeApp, FirebaseApp } from 'firebase/app';
+import { getDatabase, ref, onValue, set, get, Database } from 'firebase/database';
 import { GameState, Member, AccessLog } from './types';
 
 // Firebase configuration
@@ -13,17 +13,39 @@ const firebaseConfig = {
   appId: "1:940729633848:web:8bec843c599a5467562acd"
 };
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const database = getDatabase(app);
+// Initialize Firebase with error handling
+let app: FirebaseApp | null = null;
+let database: Database | null = null;
+let firebaseInitialized = false;
 
-// Database references
-const gamesRef = ref(database, 'games');
-const membersRef = ref(database, 'members');
-const logsRef = ref(database, 'logs');
+try {
+  app = initializeApp(firebaseConfig);
+  database = getDatabase(app);
+  firebaseInitialized = true;
+  console.log('Firebase initialized successfully');
+} catch (error) {
+  console.error('Failed to initialize Firebase:', error);
+  firebaseInitialized = false;
+}
+
+// Check if Firebase is configured and initialized
+export const isFirebaseConfigured = (): boolean => {
+  return firebaseInitialized && firebaseConfig.apiKey !== "YOUR_API_KEY";
+};
+
+// Database references (only if initialized)
+const getGamesRef = () => database ? ref(database, 'games') : null;
+const getMembersRef = () => database ? ref(database, 'members') : null;
+const getLogsRef = () => database ? ref(database, 'logs') : null;
 
 // --- GAMES ---
 export const subscribeToGames = (callback: (games: GameState[]) => void) => {
+  const gamesRef = getGamesRef();
+  if (!gamesRef) {
+    console.warn('Firebase not initialized, skipping games subscription');
+    return () => {}; // Return empty unsubscribe function
+  }
+
   return onValue(gamesRef, (snapshot) => {
     const data = snapshot.val();
     if (data) {
@@ -31,10 +53,18 @@ export const subscribeToGames = (callback: (games: GameState[]) => void) => {
     } else {
       callback([]);
     }
+  }, (error) => {
+    console.error('Error subscribing to games:', error);
   });
 };
 
 export const saveGames = async (games: GameState[]) => {
+  const gamesRef = getGamesRef();
+  if (!gamesRef) {
+    console.warn('Firebase not initialized, skipping save games');
+    return;
+  }
+
   try {
     await set(gamesRef, games);
   } catch (error) {
@@ -43,6 +73,11 @@ export const saveGames = async (games: GameState[]) => {
 };
 
 export const getGames = async (): Promise<GameState[]> => {
+  const gamesRef = getGamesRef();
+  if (!gamesRef) {
+    return [];
+  }
+
   try {
     const snapshot = await get(gamesRef);
     return snapshot.val() || [];
@@ -54,6 +89,12 @@ export const getGames = async (): Promise<GameState[]> => {
 
 // --- MEMBERS ---
 export const subscribeToMembers = (callback: (members: Member[]) => void) => {
+  const membersRef = getMembersRef();
+  if (!membersRef) {
+    console.warn('Firebase not initialized, skipping members subscription');
+    return () => {};
+  }
+
   return onValue(membersRef, (snapshot) => {
     const data = snapshot.val();
     if (data) {
@@ -61,10 +102,18 @@ export const subscribeToMembers = (callback: (members: Member[]) => void) => {
     } else {
       callback([]);
     }
+  }, (error) => {
+    console.error('Error subscribing to members:', error);
   });
 };
 
 export const saveMembers = async (members: Member[]) => {
+  const membersRef = getMembersRef();
+  if (!membersRef) {
+    console.warn('Firebase not initialized, skipping save members');
+    return;
+  }
+
   try {
     await set(membersRef, members);
   } catch (error) {
@@ -73,6 +122,11 @@ export const saveMembers = async (members: Member[]) => {
 };
 
 export const getMembers = async (): Promise<Member[]> => {
+  const membersRef = getMembersRef();
+  if (!membersRef) {
+    return [];
+  }
+
   try {
     const snapshot = await get(membersRef);
     return snapshot.val() || [];
@@ -84,6 +138,12 @@ export const getMembers = async (): Promise<Member[]> => {
 
 // --- LOGS ---
 export const subscribeToLogs = (callback: (logs: AccessLog[]) => void) => {
+  const logsRef = getLogsRef();
+  if (!logsRef) {
+    console.warn('Firebase not initialized, skipping logs subscription');
+    return () => {};
+  }
+
   return onValue(logsRef, (snapshot) => {
     const data = snapshot.val();
     if (data) {
@@ -91,10 +151,18 @@ export const subscribeToLogs = (callback: (logs: AccessLog[]) => void) => {
     } else {
       callback([]);
     }
+  }, (error) => {
+    console.error('Error subscribing to logs:', error);
   });
 };
 
 export const saveLogs = async (logs: AccessLog[]) => {
+  const logsRef = getLogsRef();
+  if (!logsRef) {
+    console.warn('Firebase not initialized, skipping save logs');
+    return;
+  }
+
   try {
     await set(logsRef, logs);
   } catch (error) {
@@ -103,6 +171,11 @@ export const saveLogs = async (logs: AccessLog[]) => {
 };
 
 export const getLogs = async (): Promise<AccessLog[]> => {
+  const logsRef = getLogsRef();
+  if (!logsRef) {
+    return [];
+  }
+
   try {
     const snapshot = await get(logsRef);
     return snapshot.val() || [];
@@ -110,11 +183,6 @@ export const getLogs = async (): Promise<AccessLog[]> => {
     console.error('Failed to get logs from Firebase:', error);
     return [];
   }
-};
-
-// Check if Firebase is configured
-export const isFirebaseConfigured = (): boolean => {
-  return firebaseConfig.apiKey !== "YOUR_API_KEY";
 };
 
 export { database };
