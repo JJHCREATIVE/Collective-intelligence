@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { GameState, AppContextState, Team, Player, UserSession, Member, AccessLog } from './types';
 import { createFullDeck, calculatePlayerScore, checkGameEnd, generateGameId, calculateFinalRanking, generatePlayerId } from './utils';
 import { GridBackground, Panel, Input, Button, Footer } from './components/UI';
@@ -7,6 +7,15 @@ import { HostView } from './components/HostView';
 import { PlayerView } from './components/PlayerView';
 import { AdminDashboard } from './components/AdminDashboard';
 import { Hexagon, RefreshCw, Building2, Lock, LogIn, UserCog, ShieldCheck, LogOut, Sun, Moon } from 'lucide-react';
+import {
+  isFirebaseConfigured,
+  subscribeToGames,
+  subscribeToMembers,
+  subscribeToLogs,
+  saveGames,
+  saveMembers,
+  saveLogs
+} from './firebase';
 
 // --- MOCK DATA ---
 const createMockGame = (name: string, teamCount: number, started: boolean, ended: boolean, playersPerTeam: number): GameState => {
@@ -99,6 +108,9 @@ const saveToStorage = <T,>(key: string, data: T): void => {
 };
 
 const App: React.FC = () => {
+  // Check if Firebase is configured
+  const useFirebase = isFirebaseConfigured();
+
   // Global Data State - Initialize from localStorage or fallback to initial data
   const [games, setGames] = useState<GameState[]>(() =>
     loadFromStorage(STORAGE_KEYS.GAMES, INITIAL_GAMES)
@@ -109,6 +121,9 @@ const App: React.FC = () => {
   const [logs, setLogs] = useState<AccessLog[]>(() =>
     loadFromStorage(STORAGE_KEYS.LOGS, INITIAL_LOGS)
   );
+
+  // Track if data is from Firebase (to prevent re-saving)
+  const isFirebaseUpdate = useRef(false);
 
   // Theme State
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
@@ -162,21 +177,79 @@ const App: React.FC = () => {
     }
   }, [theme]);
 
-  // --- SYNC STATE TO LOCALSTORAGE ---
+  // --- FIREBASE REAL-TIME SYNC (for cross-device sync) ---
   useEffect(() => {
+    if (!useFirebase) return;
+
+    console.log('Firebase is configured. Setting up real-time sync...');
+
+    // Subscribe to games
+    const unsubscribeGames = subscribeToGames((newGames) => {
+      if (newGames && newGames.length > 0) {
+        isFirebaseUpdate.current = true;
+        setGames(newGames);
+        // Also save to localStorage as cache
+        saveToStorage(STORAGE_KEYS.GAMES, newGames);
+      }
+    });
+
+    // Subscribe to members
+    const unsubscribeMembers = subscribeToMembers((newMembers) => {
+      if (newMembers) {
+        isFirebaseUpdate.current = true;
+        setMembers(newMembers);
+        saveToStorage(STORAGE_KEYS.MEMBERS, newMembers);
+      }
+    });
+
+    // Subscribe to logs
+    const unsubscribeLogs = subscribeToLogs((newLogs) => {
+      if (newLogs) {
+        isFirebaseUpdate.current = true;
+        setLogs(newLogs);
+        saveToStorage(STORAGE_KEYS.LOGS, newLogs);
+      }
+    });
+
+    return () => {
+      unsubscribeGames();
+      unsubscribeMembers();
+      unsubscribeLogs();
+    };
+  }, [useFirebase]);
+
+  // --- SYNC STATE TO STORAGE (localStorage + Firebase) ---
+  useEffect(() => {
+    // Always save to localStorage
     saveToStorage(STORAGE_KEYS.GAMES, games);
-  }, [games]);
+
+    // If Firebase is configured and this is NOT from a Firebase update, save to Firebase
+    if (useFirebase && !isFirebaseUpdate.current) {
+      saveGames(games);
+    }
+    isFirebaseUpdate.current = false;
+  }, [games, useFirebase]);
 
   useEffect(() => {
     saveToStorage(STORAGE_KEYS.MEMBERS, members);
-  }, [members]);
+    if (useFirebase && !isFirebaseUpdate.current) {
+      saveMembers(members);
+    }
+    isFirebaseUpdate.current = false;
+  }, [members, useFirebase]);
 
   useEffect(() => {
     saveToStorage(STORAGE_KEYS.LOGS, logs);
-  }, [logs]);
+    if (useFirebase && !isFirebaseUpdate.current) {
+      saveLogs(logs);
+    }
+    isFirebaseUpdate.current = false;
+  }, [logs, useFirebase]);
 
-  // --- CROSS-TAB SYNC: Listen for storage changes from other tabs ---
+  // --- CROSS-TAB SYNC: Listen for storage changes from other tabs (fallback when Firebase not configured) ---
   useEffect(() => {
+    if (useFirebase) return; // Skip if using Firebase
+
     const handleStorageChange = (e: StorageEvent) => {
       if (e.key === STORAGE_KEYS.GAMES && e.newValue) {
         try {
@@ -206,10 +279,12 @@ const App: React.FC = () => {
 
     window.addEventListener('storage', handleStorageChange);
     return () => window.removeEventListener('storage', handleStorageChange);
-  }, []);
+  }, [useFirebase]);
 
-  // --- PERIODIC SYNC: Refresh from localStorage every 2 seconds for real-time updates ---
+  // --- PERIODIC SYNC: Refresh from localStorage (fallback when Firebase not configured) ---
   useEffect(() => {
+    if (useFirebase) return; // Skip if using Firebase
+
     const syncInterval = setInterval(() => {
       const storedGames = loadFromStorage(STORAGE_KEYS.GAMES, null);
       if (storedGames && JSON.stringify(storedGames) !== JSON.stringify(games)) {
@@ -218,7 +293,7 @@ const App: React.FC = () => {
     }, 2000);
 
     return () => clearInterval(syncInterval);
-  }, [games]);
+  }, [games, useFirebase]);
 
   // --- SECURITY EFFECT: Kick out deleted/suspended members ---
   useEffect(() => {
