@@ -3,20 +3,14 @@ import { getDatabase, ref, onValue, set, get } from 'firebase/database';
 import { GameState, Member, AccessLog } from './types';
 
 // Firebase configuration
-// TODO: Replace with your own Firebase project credentials
-// 1. Go to https://console.firebase.google.com/
-// 2. Create a new project (or use existing)
-// 3. Go to Project Settings > General > Your apps > Add app (Web)
-// 4. Copy the firebaseConfig object and paste it below
-// 5. Go to Realtime Database > Create Database > Start in test mode
 const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-  databaseURL: "https://YOUR_PROJECT_ID-default-rtdb.firebaseio.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT_ID.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  apiKey: "AIzaSyCSKxaIvU3EJYYD4P9rikrn4T3NTM82Zz8",
+  authDomain: "collective-intelligence-jjh.firebaseapp.com",
+  databaseURL: "https://collective-intelligence-jjh-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "collective-intelligence-jjh",
+  storageBucket: "collective-intelligence-jjh.firebasestorage.app",
+  messagingSenderId: "940729633848",
+  appId: "1:940729633848:web:8bec843c599a5467562acd"
 };
 
 // Initialize Firebase
