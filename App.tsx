@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { GameState, AppContextState, Team, Player, UserSession, Member, AccessLog } from './types';
 import { createFullDeck, calculatePlayerScore, checkGameEnd, generateGameId, calculateFinalRanking, generatePlayerId } from './utils';
 import { GridBackground, Panel, Input, Button, Footer } from './components/UI';
@@ -7,6 +7,15 @@ import { HostView } from './components/HostView';
 import { PlayerView } from './components/PlayerView';
 import { AdminDashboard } from './components/AdminDashboard';
 import { Hexagon, RefreshCw, Building2, Lock, LogIn, UserCog, ShieldCheck, LogOut, Sun, Moon } from 'lucide-react';
+import {
+  isFirebaseConfigured,
+  subscribeToGames,
+  subscribeToMembers,
+  subscribeToLogs,
+  saveGames,
+  saveMembers,
+  saveLogs
+} from './firebase';
 
 // --- MOCK DATA ---
 const createMockGame = (name: string, teamCount: number, started: boolean, ended: boolean, playersPerTeam: number): GameState => {
@@ -69,11 +78,52 @@ const INITIAL_LOGS: AccessLog[] = [
   }
 ];
 
+// --- LOCAL STORAGE KEYS ---
+const STORAGE_KEYS = {
+  GAMES: 'collective_intelligence_games',
+  MEMBERS: 'collective_intelligence_members',
+  LOGS: 'collective_intelligence_logs',
+};
+
+// --- HELPER: Load from localStorage with fallback ---
+const loadFromStorage = <T,>(key: string, fallback: T): T => {
+  try {
+    const stored = localStorage.getItem(key);
+    if (stored) {
+      return JSON.parse(stored);
+    }
+  } catch (e) {
+    console.error(`Failed to load ${key} from localStorage:`, e);
+  }
+  return fallback;
+};
+
+// --- HELPER: Save to localStorage ---
+const saveToStorage = <T,>(key: string, data: T): void => {
+  try {
+    localStorage.setItem(key, JSON.stringify(data));
+  } catch (e) {
+    console.error(`Failed to save ${key} to localStorage:`, e);
+  }
+};
+
 const App: React.FC = () => {
-  // Global Data State
-  const [games, setGames] = useState<GameState[]>(INITIAL_GAMES);
-  const [members, setMembers] = useState<Member[]>(INITIAL_MEMBERS);
-  const [logs, setLogs] = useState<AccessLog[]>(INITIAL_LOGS);
+  // Check if Firebase is configured
+  const useFirebase = isFirebaseConfigured();
+
+  // Global Data State - Initialize from localStorage or fallback to initial data
+  const [games, setGames] = useState<GameState[]>(() =>
+    loadFromStorage(STORAGE_KEYS.GAMES, INITIAL_GAMES)
+  );
+  const [members, setMembers] = useState<Member[]>(() =>
+    loadFromStorage(STORAGE_KEYS.MEMBERS, INITIAL_MEMBERS)
+  );
+  const [logs, setLogs] = useState<AccessLog[]>(() =>
+    loadFromStorage(STORAGE_KEYS.LOGS, INITIAL_LOGS)
+  );
+
+  // Track if data is from Firebase (to prevent re-saving)
+  const isFirebaseUpdate = useRef(false);
 
   // Theme State
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
@@ -126,6 +176,124 @@ const App: React.FC = () => {
         document.documentElement.classList.remove('dark');
     }
   }, [theme]);
+
+  // --- FIREBASE REAL-TIME SYNC (for cross-device sync) ---
+  useEffect(() => {
+    if (!useFirebase) return;
+
+    console.log('Firebase is configured. Setting up real-time sync...');
+
+    // Subscribe to games
+    const unsubscribeGames = subscribeToGames((newGames) => {
+      if (newGames && newGames.length > 0) {
+        isFirebaseUpdate.current = true;
+        setGames(newGames);
+        // Also save to localStorage as cache
+        saveToStorage(STORAGE_KEYS.GAMES, newGames);
+      }
+    });
+
+    // Subscribe to members
+    const unsubscribeMembers = subscribeToMembers((newMembers) => {
+      if (newMembers) {
+        isFirebaseUpdate.current = true;
+        setMembers(newMembers);
+        saveToStorage(STORAGE_KEYS.MEMBERS, newMembers);
+      }
+    });
+
+    // Subscribe to logs
+    const unsubscribeLogs = subscribeToLogs((newLogs) => {
+      if (newLogs) {
+        isFirebaseUpdate.current = true;
+        setLogs(newLogs);
+        saveToStorage(STORAGE_KEYS.LOGS, newLogs);
+      }
+    });
+
+    return () => {
+      unsubscribeGames();
+      unsubscribeMembers();
+      unsubscribeLogs();
+    };
+  }, [useFirebase]);
+
+  // --- SYNC STATE TO STORAGE (localStorage + Firebase) ---
+  useEffect(() => {
+    // Always save to localStorage
+    saveToStorage(STORAGE_KEYS.GAMES, games);
+
+    // If Firebase is configured and this is NOT from a Firebase update, save to Firebase
+    if (useFirebase && !isFirebaseUpdate.current) {
+      saveGames(games);
+    }
+    isFirebaseUpdate.current = false;
+  }, [games, useFirebase]);
+
+  useEffect(() => {
+    saveToStorage(STORAGE_KEYS.MEMBERS, members);
+    if (useFirebase && !isFirebaseUpdate.current) {
+      saveMembers(members);
+    }
+    isFirebaseUpdate.current = false;
+  }, [members, useFirebase]);
+
+  useEffect(() => {
+    saveToStorage(STORAGE_KEYS.LOGS, logs);
+    if (useFirebase && !isFirebaseUpdate.current) {
+      saveLogs(logs);
+    }
+    isFirebaseUpdate.current = false;
+  }, [logs, useFirebase]);
+
+  // --- CROSS-TAB SYNC: Listen for storage changes from other tabs (fallback when Firebase not configured) ---
+  useEffect(() => {
+    if (useFirebase) return; // Skip if using Firebase
+
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === STORAGE_KEYS.GAMES && e.newValue) {
+        try {
+          const newGames = JSON.parse(e.newValue);
+          setGames(newGames);
+        } catch (err) {
+          console.error('Failed to parse games from storage event:', err);
+        }
+      }
+      if (e.key === STORAGE_KEYS.MEMBERS && e.newValue) {
+        try {
+          const newMembers = JSON.parse(e.newValue);
+          setMembers(newMembers);
+        } catch (err) {
+          console.error('Failed to parse members from storage event:', err);
+        }
+      }
+      if (e.key === STORAGE_KEYS.LOGS && e.newValue) {
+        try {
+          const newLogs = JSON.parse(e.newValue);
+          setLogs(newLogs);
+        } catch (err) {
+          console.error('Failed to parse logs from storage event:', err);
+        }
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, [useFirebase]);
+
+  // --- PERIODIC SYNC: Refresh from localStorage (fallback when Firebase not configured) ---
+  useEffect(() => {
+    if (useFirebase) return; // Skip if using Firebase
+
+    const syncInterval = setInterval(() => {
+      const storedGames = loadFromStorage(STORAGE_KEYS.GAMES, null);
+      if (storedGames && JSON.stringify(storedGames) !== JSON.stringify(games)) {
+        setGames(storedGames);
+      }
+    }, 2000);
+
+    return () => clearInterval(syncInterval);
+  }, [games, useFirebase]);
 
   // --- SECURITY EFFECT: Kick out deleted/suspended members ---
   useEffect(() => {
