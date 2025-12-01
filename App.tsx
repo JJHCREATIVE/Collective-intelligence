@@ -141,6 +141,10 @@ const App: React.FC = () => {
   // Track if data is from Firebase (to prevent re-saving)
   const isFirebaseUpdate = useRef(false);
 
+  // Track recent local changes to prevent Firebase from overwriting them
+  const lastLocalChangeTime = useRef<number>(0);
+  const LOCAL_CHANGE_DEBOUNCE = 2000; // 2 seconds debounce
+
   // Theme State
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
 
@@ -201,6 +205,13 @@ const App: React.FC = () => {
 
     // Subscribe to games
     const unsubscribeGames = subscribeToGames((newGames) => {
+      // Skip if there was a recent local change (prevent race condition)
+      const timeSinceLocalChange = Date.now() - lastLocalChangeTime.current;
+      if (timeSinceLocalChange < LOCAL_CHANGE_DEBOUNCE) {
+        console.log('Skipping Firebase update due to recent local change');
+        return;
+      }
+
       if (newGames && newGames.length > 0) {
         isFirebaseUpdate.current = true;
         setGames(newGames);
@@ -241,6 +252,8 @@ const App: React.FC = () => {
 
     // If Firebase is configured and this is NOT from a Firebase update, save to Firebase
     if (useFirebase && !isFirebaseUpdate.current) {
+      // Mark that we're making a local change
+      lastLocalChangeTime.current = Date.now();
       saveGames(games);
     }
     isFirebaseUpdate.current = false;
