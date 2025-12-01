@@ -19,7 +19,14 @@ export const PlayerView: React.FC<PlayerViewProps> = ({ game, team: myTeam, me, 
     setPendingIndex(null);
   }, [game.currentRound, myTeam.hasPlacedCurrentNumber]);
 
-  const sortedTeams = [...game.teams].sort((a, b) => {
+  // Ensure all teams have players and board arrays (Firebase doesn't store empty arrays)
+  const safeTeams = game.teams.map(t => ({
+    ...t,
+    players: t.players || [],
+    board: t.board || Array(20).fill(null)
+  }));
+
+  const sortedTeams = [...safeTeams].sort((a, b) => {
     if (a.teamNumber === myTeam.teamNumber) return -1;
     if (b.teamNumber === myTeam.teamNumber) return 1;
     return a.teamNumber - b.teamNumber;

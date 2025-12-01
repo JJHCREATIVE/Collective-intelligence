@@ -12,7 +12,13 @@ interface HostViewProps {
 }
 
 export const HostView: React.FC<HostViewProps> = ({ game, onStartGame, onSelectNumber }) => {
-  const activeTeams = game.teams.filter(t => t.players.length > 0);
+  // Ensure players array exists (Firebase doesn't store empty arrays)
+  const safeTeams = game.teams.map(t => ({
+    ...t,
+    players: t.players || [],
+    board: t.board || Array(20).fill(null)
+  }));
+  const activeTeams = safeTeams.filter(t => t.players.length > 0);
   const sortedTeams = [...activeTeams].sort((a, b) => b.score - a.score);
   
   // Sidebar Tab State
@@ -54,12 +60,12 @@ export const HostView: React.FC<HostViewProps> = ({ game, onStartGame, onSelectN
   // Logic to determine which teams to display in the main grid (Top 8)
   const displayedTeams = useMemo(() => {
     if (!game.gameStarted) {
-      const teamsToShow = activeTeams.length > 0 ? activeTeams : game.teams;
+      const teamsToShow = activeTeams.length > 0 ? activeTeams : safeTeams;
       return teamsToShow.slice(0, 8);
     } else {
       return sortedTeams.slice(0, 8);
     }
-  }, [game.teams, game.gameStarted, activeTeams, sortedTeams]);
+  }, [safeTeams, game.gameStarted, activeTeams, sortedTeams]);
 
   const getGridStyle = (index: number) => {
     let colStart, rowStart;
